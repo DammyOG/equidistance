@@ -2,6 +2,12 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 
+/** Helper: Extract address portion before the first comma */
+function extractAddressPart(address: string): string {
+    const match = address.match(/^([0-9a-zA-Z\s]+)/);
+    return match ? match[1] : address;
+}
+
 /** Basic Haversine formula to compute approximate distance (in km) */
 interface Coordinates {
     lat: number;
@@ -45,7 +51,6 @@ async function reverseGeocode(lat: number, lon: number): Promise<string | null> 
             `https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&lat=${lat}&lon=${lon}&addressdetails=1`,
             {
                 headers: {
-                    // Set a proper User-Agent as recommended by Nominatim usage policy.
                     "User-Agent": "equi/1.0 (Oluwadamilolaogunbode@gmail.com)"
                 }
             }
@@ -196,9 +201,17 @@ export default function Search() {
         setMessage("");
         setMidpoint(null);
 
+        // Extract the relevant part of the addresses before geocoding
+        const cleanedAddress1 = extractAddressPart(address1);
+        const cleanedAddress2 = extractAddressPart(address2);
+
+        console.log(address1, cleanedAddress1);
+        console.log(address2, cleanedAddress2);
+
         try {
-            const c1 = await geocodeAddress(address1);
-            const c2 = await geocodeAddress(address2);
+
+            const c1 = await geocodeAddress(cleanedAddress1);
+            const c2 = await geocodeAddress(cleanedAddress2);
 
             if (!c1 || !c2) {
                 setMessage("Failed to geocode one or both addresses.");
@@ -226,7 +239,7 @@ export default function Search() {
             while (attempts < maxAttempts && (!results || results.length < desiredCount)) {
                 results = await searchPlacesOverpass(mid.lat, mid.lon, query, bboxDelta);
                 if (!results || results.length < desiredCount) {
-                    distanceKm += parseFloat(initialDistance);
+                    distanceKm += 2 * parseFloat(initialDistance);
                     bboxDelta = distanceKm / 111;
                     attempts++;
                 } else {
@@ -361,7 +374,9 @@ export default function Search() {
                                 </div>
                                 <div className="text-sm text-gray-600">
                                     {place.full_address && (
-                                        <span className="block mb-1">Address: {place.full_address}</span>
+                                        <span className="block mb-1">
+                                            Address: {place.full_address}
+                                        </span>
                                     )}
                                     <span>Distance from Address 1: {place.dist1.toFixed(2)} km</span>
                                     <br />

@@ -48,16 +48,16 @@ export default function NavBar() {
                         Home
                     </span>
                 </Link>
-                <Link href="/profile">
+                {/* <Link href="/profile">
                     <span className="cursor-pointer text-lg hover:text-gray-300">
                         Profile
                     </span>
-                </Link>
+                </Link> */}
             </div>
             <div>
                 {session ? (
                     <span className="text-md">
-                        Welcome, {session.user.username || "Guest"}
+                        Welcome, {session.user.username}!
                     </span>
                 ) : (
                     <Link href="/auth/signin">
