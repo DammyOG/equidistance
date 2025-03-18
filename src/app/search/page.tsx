@@ -27,6 +27,11 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
     return R * c; // distance in km
 }
 
+/** Sleep function to pause execution for a specified duration */
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Geocode an address using Nominatim */
 interface GeocodeResult {
     lat: number;
@@ -202,8 +207,11 @@ export default function Search() {
         setMidpoint(null);
 
         // Extract the relevant part of the addresses before geocoding
-        const cleanedAddress1 = extractAddressPart(address1);
-        const cleanedAddress2 = extractAddressPart(address2);
+        // const cleanedAddress1 = extractAddressPart(address1);
+        // const cleanedAddress2 = extractAddressPart(address2);
+
+        const cleanedAddress1 = address1.trim();
+        const cleanedAddress2 = address2.trim();
 
         console.log(address1, cleanedAddress1);
         console.log(address2, cleanedAddress2);
@@ -226,26 +234,34 @@ export default function Search() {
             const mid = calculateMidpoint(c1, c2);
             setMidpoint(mid);
 
-            // Start with the user-defined search distance (in km)
-            let distanceKm = parseFloat(initialDistance);
-            let bboxDelta = distanceKm / 111; // Rough conversion
+
 
             let results: Place[] = [];
             let attempts = 0;
             const maxAttempts = 5;
-            const desiredCount = 2;
+            const desiredCount = 3;
 
-            // Expand the search area until results are found or maxAttempts reached
+            // Let's say you want to start with a 2-mile radius:
+            const initialDistanceMiles = 2;
+            let distanceMiles = initialDistanceMiles;
+            let bboxDelta = distanceMiles / 69; // Convert miles to degrees (approx.)
+
             while (attempts < maxAttempts && (!results || results.length < desiredCount)) {
                 results = await searchPlacesOverpass(mid.lat, mid.lon, query, bboxDelta);
+                console.log(`Attempt ${attempts}: bboxDelta = ${bboxDelta}, Results = ${results ? results.length : 0}`);
+
                 if (!results || results.length < desiredCount) {
-                    distanceKm += 2 * parseFloat(initialDistance);
-                    bboxDelta = distanceKm / 111;
+                    // Increase the search radius by 1.2 times the initial miles for example:
+                    distanceMiles += 1.2 * initialDistanceMiles;
+                    bboxDelta = distanceMiles / 69;
                     attempts++;
+                    await sleep(500); // optional delay between iterations
                 } else {
                     break;
                 }
             }
+
+
 
             if (!results || results.length === 0) {
                 setMessage("No places found near the midpoint for your query.");
@@ -378,11 +394,11 @@ export default function Search() {
                                             Address: {place.full_address}
                                         </span>
                                     )}
-                                    <span>Distance from Address 1: {place.dist1.toFixed(2)} km</span>
+                                    <span>Distance from Address 1: {place.dist1.toFixed(2)} miles</span>
                                     <br />
-                                    <span>Distance from Address 2: {place.dist2.toFixed(2)} km</span>
+                                    <span>Distance from Address 2: {place.dist2.toFixed(2)} miles</span>
                                     <br />
-                                    <span>Total Distance: {place.sumDist.toFixed(2)} km</span>
+                                    <span>Total Distance: {place.sumDist.toFixed(2)} miles</span>
                                 </div>
                             </div>
                         ))}
