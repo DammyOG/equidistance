@@ -2,7 +2,10 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 
-/** Helper: Extract address portion before the first comma */
+// Use your public API key set in your environment variables
+const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+/** Helper: Extract address portion before the first comma (if needed) */
 function extractAddressPart(address: string): string {
     const match = address.match(/^([0-9a-zA-Z\s]+)/);
     return match ? match[1] : address;
@@ -32,7 +35,7 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Geocode an address using Nominatim */
+/** Geocode an address using the Google Maps Geocoding API */
 interface GeocodeResult {
     lat: number;
     lon: number;
@@ -40,28 +43,30 @@ interface GeocodeResult {
 
 async function geocodeAddress(address: string): Promise<GeocodeResult | null> {
     const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+            address
+        )}&key=${GOOGLE_MAPS_API_KEY}`
     );
-    const data: Array<{ lat: string; lon: string }> = await res.json();
-    if (data && data.length > 0) {
-        return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+    const data = await res.json();
+    // console.log(data);
+    if (data && data.results && data.results.length > 0) {
+        const location = data.results[0].geometry.location;
+        return { lat: location.lat, lon: location.lng };
     }
     return null;
 }
 
-/** Reverse geocode using Nominatim */
+/** Reverse geocode using the Google Maps Geocoding API */
 async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
     try {
         const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&lat=${lat}&lon=${lon}&addressdetails=1`,
-            {
-                headers: {
-                    "User-Agent": "equi/1.0 (Oluwadamilolaogunbode@gmail.com)"
-                }
-            }
+            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${GOOGLE_MAPS_API_KEY}`
         );
         const data = await res.json();
-        return data?.display_name || null;
+        if (data && data.results && data.results.length > 0) {
+            return data.results[0].formatted_address;
+        }
+        return null;
     } catch (error) {
         console.error("Reverse geocode error:", error);
         return null;
@@ -81,91 +86,36 @@ function calculateMidpoint(coord1: Coordinates, coord2: Coordinates): MidpointCo
     };
 }
 
-interface CoordinatesResult {
-    lat: number;
-    lon: number;
-}
-
-/** Get coordinates from an element (node or way/relation) */
-function getElementCoordinates(element: any): CoordinatesResult | null {
-    if (element.lat && element.lon) {
-        return {
-            lat: typeof element.lat === "string" ? parseFloat(element.lat) : element.lat,
-            lon: typeof element.lon === "string" ? parseFloat(element.lon) : element.lon,
-        };
-    } else if (element.center && element.center.lat && element.center.lon) {
-        return {
-            lat: typeof element.center.lat === "string" ? parseFloat(element.center.lat) : element.center.lat,
-            lon: typeof element.center.lon === "string" ? parseFloat(element.center.lon) : element.center.lon,
-        };
+/** Search for places using the Google Places Nearby Search API */
+interface GooglePlace {
+    formattedAddress: string;
+    displayName: {
+        text: string;
     }
-    return null;
+    location: {
+        latitude: number;
+        longitude: number;
+    };
 }
 
-/**
- * Searches for places near (lat, lon) using the Overpass API.
- */
-async function searchPlacesOverpass(lat: number, lon: number, query: string, bboxDelta: number): Promise<any[]> {
-    const north = lat + bboxDelta;
-    const south = lat - bboxDelta;
-    const east = lon + bboxDelta;
-    const west = lon - bboxDelta;
-
-    const overpassQuery = `
-    [out:json][timeout:25];
-    (
-      node["name"~"${query}",i](${south},${west},${north},${east});
-      way["name"~"${query}",i](${south},${west},${north},${east});
-      relation["name"~"${query}",i](${south},${west},${north},${east});
+async function searchPlacesProxy(lat: number, lon: number, query: string, radius: number): Promise<any[]> {
+    const res = await fetch(
+        `/api/places?lat=${lat}&lng=${lon}&radius=${radius}&keyword=${encodeURIComponent(query)}`
     );
-    out center;
-  `;
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-        body: `data=${encodeURIComponent(overpassQuery)}`,
-    });
 
-    if (!res.ok) {
-        console.error("Overpass API error:", res.status, res.statusText);
-        throw new Error(`Overpass API error: ${res.status} ${res.statusText}`);
-    }
-
-    try {
-        const data = await res.json();
-        return data.elements;
-    } catch (err) {
-        const text = await res.text();
-        console.error("Failed to parse JSON:", text);
-        throw err;
-    }
+    const data = await res.json();
+    // console.log(data);
+    return data.places || [];
 }
 
-/**
- * Search for places using Nominatim (bounding box search).
- */
-interface Place {
-    place_id: string;
-    display_name: string;
-    lat: string;
-    lon: string;
-}
 
-async function searchPlacesNearMidpoint(lat: number, lon: number, query: string, bboxDelta: number): Promise<Place[]> {
-    const north = lat + bboxDelta;
-    const south = lat - bboxDelta;
-    const east = lon + bboxDelta;
-    const west = lon - bboxDelta;
 
-    const url =
-        `https://nominatim.openstreetmap.org/search?format=json` +
-        `&q=${encodeURIComponent(query)}` +
-        `&bounded=1` +
-        `&viewbox=${west},${north},${east},${south}`;
-
-    const res = await fetch(url);
-    const data: Place[] = await res.json();
-    return data;
+/** Extract coordinates from a Google Place result */
+function getPlaceCoordinates(place: GooglePlace): { lat: number; lon: number } {
+    return {
+        lat: place.location.latitude,
+        lon: place.location.longitude,
+    };
 }
 
 export default function Search() {
@@ -175,7 +125,7 @@ export default function Search() {
     const [address2, setAddress2] = useState("");
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(false);
-    const [initialDistance, setInitialDistance] = useState("2"); // Default search radius in km
+    const [initialDistance, setInitialDistance] = useState("2"); // Default search radius in miles
 
     // Coordinates for each address
     const [coord1, setCoord1] = useState<GeocodeResult | null>(null);
@@ -190,13 +140,11 @@ export default function Search() {
     // Error or info messages
     const [message, setMessage] = useState("");
 
-    interface EnrichedPlace extends Place {
-        coords: CoordinatesResult;
+    interface EnrichedPlace extends GooglePlace {
+        coords: { lat: number; lon: number };
         dist1: number;
         dist2: number;
         sumDist: number;
-        full_address?: string;
-        tags?: { name?: string };
     }
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -206,20 +154,15 @@ export default function Search() {
         setMessage("");
         setMidpoint(null);
 
-        // Extract the relevant part of the addresses before geocoding
-        // const cleanedAddress1 = extractAddressPart(address1);
-        // const cleanedAddress2 = extractAddressPart(address2);
-
         const cleanedAddress1 = address1.trim();
         const cleanedAddress2 = address2.trim();
 
-        console.log(address1, cleanedAddress1);
-        console.log(address2, cleanedAddress2);
-
         try {
-
             const c1 = await geocodeAddress(cleanedAddress1);
             const c2 = await geocodeAddress(cleanedAddress2);
+
+            // console.log("Coordinates 1:", c1);
+            // console.log("Coordinates 2:", c2);
 
             if (!c1 || !c2) {
                 setMessage("Failed to geocode one or both addresses.");
@@ -234,26 +177,19 @@ export default function Search() {
             const mid = calculateMidpoint(c1, c2);
             setMidpoint(mid);
 
-
-
-            let results: Place[] = [];
+            let results: GooglePlace[] = [];
             let attempts = 0;
-            const maxAttempts = 5;
+            const maxAttempts = 3;
             const desiredCount = 3;
+            const initialDistanceMiles = parseFloat(initialDistance) || 2;
+            let radiusMeters = initialDistanceMiles * 1609.34; // Convert miles to meters
 
-            // Let's say you want to start with a 2-mile radius:
-            const initialDistanceMiles = 2;
-            let distanceMiles = initialDistanceMiles;
-            let bboxDelta = distanceMiles / 69; // Convert miles to degrees (approx.)
-
-            while (attempts < maxAttempts && (!results || results.length < desiredCount)) {
-                results = await searchPlacesOverpass(mid.lat, mid.lon, query, bboxDelta);
-                console.log(`Attempt ${attempts}: bboxDelta = ${bboxDelta}, Results = ${results ? results.length : 0}`);
-
-                if (!results || results.length < desiredCount) {
-                    // Increase the search radius by 1.2 times the initial miles for example:
-                    distanceMiles += 1.2 * initialDistanceMiles;
-                    bboxDelta = distanceMiles / 69;
+            while (attempts < maxAttempts && results.length < desiredCount) {
+                results = await searchPlacesProxy(mid.lat, mid.lon, query, radiusMeters);
+                // console.log(`Attempt ${attempts}: radius = ${radiusMeters} meters, Results = ${results.length}`);
+                if (results.length < desiredCount) {
+                    // Increase the search radius by 1.2 times the initial radius
+                    radiusMeters += 1.2 * (initialDistanceMiles * 1609.34);
                     attempts++;
                     await sleep(500); // optional delay between iterations
                 } else {
@@ -261,30 +197,22 @@ export default function Search() {
                 }
             }
 
-
-
-            if (!results || results.length === 0) {
+            if (results.length === 0) {
                 setMessage("No places found near the midpoint for your query.");
             } else {
-                const enriched = results
-                    .map((element) => {
-                        const coords = getElementCoordinates(element);
-                        if (!coords) return null;
-                        const dist1 = haversineDistance(c1.lat, c1.lon, coords.lat, coords.lon);
-                        const dist2 = haversineDistance(c2.lat, c2.lon, coords.lat, coords.lon);
-                        return { ...element, coords, dist1, dist2, sumDist: dist1 + dist2 };
-                    })
-                    .filter((place): place is EnrichedPlace => place !== null);
+                // Top 5 results
+                const enriched = results.map((place) => {
+                    const coords = getPlaceCoordinates(place);
+                    // console.log("Place Coordinates:", coords);
+                    const dist1 = haversineDistance(c1.lat, c1.lon, coords.lat, coords.lon);
+                    const dist2 = haversineDistance(c2.lat, c2.lon, coords.lat, coords.lon);
+                    return { ...place, coords, dist1, dist2, sumDist: dist1 + dist2 };
+                });
 
-                const enrichedWithAddress: EnrichedPlace[] = await Promise.all(
-                    enriched.map(async (place) => {
-                        const fullAddress = await reverseGeocode(place.coords.lat, place.coords.lon);
-                        return { ...place, full_address: fullAddress || "Address not found" };
-                    })
-                );
+                // console.log("Enriched Places:", enriched);
 
-                enrichedWithAddress.sort((a, b) => a.sumDist - b.sumDist);
-                setPlaces(enrichedWithAddress.slice(0, 5)); // Top 5 results
+                enriched.sort((a, b) => a.sumDist - b.sumDist);
+                setPlaces(enriched.slice(0, 5)); // Top 5 results
             }
         } catch (err) {
             console.error(err);
@@ -351,7 +279,7 @@ export default function Search() {
                     {/* Search Bar for Query */}
                     <div>
                         <label htmlFor="query" className="block mb-1 font-medium text-gray-700">
-                            Search Query (e.g., "bowling arena"):
+                            Search Query (e.g., "bowling alley"):
                         </label>
                         <input
                             id="query"
@@ -384,21 +312,21 @@ export default function Search() {
                             Top Matches Near the Midpoint
                         </h2>
                         {places.map((place, index) => (
-                            <div key={place.place_id || index} className="mb-4 p-2 border-b last:border-b-0">
+                            <div key={index} className="mb-4 p-2 border-b last:border-b-0">
                                 <div className="font-bold">
-                                    {place.tags?.name || place.display_name || "Unnamed Place"}
+                                    {place.displayName.text || "Unnamed Place"}
                                 </div>
                                 <div className="text-sm text-gray-600">
-                                    {place.full_address && (
+                                    {place.formattedAddress && (
                                         <span className="block mb-1">
-                                            Address: {place.full_address}
+                                            Address: {place.formattedAddress}
                                         </span>
                                     )}
-                                    <span>Distance from Address 1: {place.dist1.toFixed(2)} miles</span>
+                                    <span>Distance from Address 1: {place.dist1.toFixed(2)} km</span>
                                     <br />
-                                    <span>Distance from Address 2: {place.dist2.toFixed(2)} miles</span>
+                                    <span>Distance from Address 2: {place.dist2.toFixed(2)} km</span>
                                     <br />
-                                    <span>Total Distance: {place.sumDist.toFixed(2)} miles</span>
+                                    <span>Total Distance: {place.sumDist.toFixed(2)} km</span>
                                 </div>
                             </div>
                         ))}
