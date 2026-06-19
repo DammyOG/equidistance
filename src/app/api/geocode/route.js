@@ -8,15 +8,40 @@ const USER_AGENT = "EquidistanceApp/1.0 (https://github.com/dammyog/equidistance
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const address = searchParams.get("address");
-
-  if (!address) {
-    return NextResponse.json(
-      { error: "Missing required query parameter: address" },
-      { status: 400 }
-    );
-  }
+  const lat = searchParams.get("lat");
+  const lon = searchParams.get("lon");
 
   try {
+    if (lat && lon) {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
+        lat
+      )}&lon=${encodeURIComponent(lon)}`;
+
+      const res = await fetch(url, {
+        headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+      });
+      const data = await res.json();
+
+      if (!data || !data.display_name) {
+        return NextResponse.json({ result: null });
+      }
+
+      return NextResponse.json({
+        result: {
+          lat: parseFloat(data.lat),
+          lon: parseFloat(data.lon),
+          displayName: data.display_name,
+        },
+      });
+    }
+
+    if (!address) {
+      return NextResponse.json(
+        { error: "Missing required query parameter: address (or lat/lon)" },
+        { status: 400 }
+      );
+    }
+
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(
       address
     )}`;

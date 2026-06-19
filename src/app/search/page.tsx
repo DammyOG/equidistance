@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 
 /** Haversine formula to compute approximate distance (in miles) */
@@ -48,10 +48,31 @@ interface Suggestion {
     lon: number;
 }
 
-async function fetchSuggestions(query: string, signal: AbortSignal): Promise<Suggestion[]> {
-    const res = await fetch(`/api/autocomplete?q=${encodeURIComponent(query)}`, { signal });
+async function fetchSuggestions(
+    query: string,
+    signal: AbortSignal,
+    userLocation: GeocodeResult | null
+): Promise<Suggestion[]> {
+    let url = `/api/autocomplete?q=${encodeURIComponent(query)}`;
+    if (userLocation) {
+        url += `&lat=${userLocation.lat}&lon=${userLocation.lon}`;
+    }
+    const res = await fetch(url, { signal });
     const data = await res.json();
     return data.suggestions || [];
+}
+
+/** Reverse geocode a coordinate into a readable address via our proxy */
+async function reverseGeocode(lat: number, lon: number): Promise<{ label: string; coord: GeocodeResult } | null> {
+    const res = await fetch(`/api/geocode?lat=${lat}&lon=${lon}`);
+    const data = await res.json();
+    if (data && data.result) {
+        return {
+            label: data.result.displayName,
+            coord: { lat: data.result.lat, lon: data.result.lon },
+        };
+    }
+    return null;
 }
 
 /** Calculate the midpoint of any number of coordinates */
@@ -136,8 +157,28 @@ export default function Search() {
     // Error or info messages
     const [message, setMessage] = useState("");
 
+    // The user's current location, used to bias autocomplete results and
+    // offer a quick "use my location" fill-in for an address.
+    const [userLocation, setUserLocation] = useState<GeocodeResult | null>(null);
+    const [locating, setLocating] = useState<number | null>(null);
+
     const debounceTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
     const abortControllers = useRef<Record<number, AbortController>>({});
+
+    useEffect(() => {
+        if (!navigator.geolocation) return;
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                setUserLocation({
+                    lat: position.coords.latitude,
+                    lon: position.coords.longitude,
+                });
+            },
+            () => {
+                // Permission denied or unavailable; autocomplete just won't be biased.
+            }
+        );
+    }, []);
 
     function updateAddress(id: number, changes: Partial<AddressEntry>) {
         setAddresses((prev) =>
@@ -160,12 +201,45 @@ export default function Search() {
             const controller = new AbortController();
             abortControllers.current[id] = controller;
             try {
-                const suggestions = await fetchSuggestions(value, controller.signal);
+                const suggestions = await fetchSuggestions(value, controller.signal, userLocation);
                 updateAddress(id, { suggestions, showSuggestions: true });
             } catch {
                 // Ignore aborted/failed lookups; user is likely still typing.
             }
         }, 400);
+    }
+
+    async function handleUseMyLocation(id: number) {
+        if (!navigator.geolocation) {
+            setMessage("Geolocation is not available in this browser.");
+            return;
+        }
+
+        setLocating(id);
+        navigator.geolocation.getCurrentPosition(
+            async (position) => {
+                const lat = position.coords.latitude;
+                const lon = position.coords.longitude;
+                setUserLocation({ lat, lon });
+
+                const result = await reverseGeocode(lat, lon);
+                if (result) {
+                    updateAddress(id, {
+                        value: result.label,
+                        coord: result.coord,
+                        suggestions: [],
+                        showSuggestions: false,
+                    });
+                } else {
+                    setMessage("Could not determine your address from your location.");
+                }
+                setLocating(null);
+            },
+            () => {
+                setMessage("Location permission was denied.");
+                setLocating(null);
+            }
+        );
     }
 
     function handleSelectSuggestion(id: number, suggestion: Suggestion) {
@@ -311,6 +385,19 @@ export default function Search() {
                                     autoComplete="off"
                                     className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
                                 />
+                                <button
+                                    type="button"
+                                    onClick={() => handleUseMyLocation(entry.id)}
+                                    disabled={locating === entry.id}
+                                    aria-label="Use my current location"
+                                    title="Use my current location"
+                                    className="p-2 text-blue-600 hover:text-blue-800 transition disabled:opacity-50"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 21c-4.5-4.5-7-8.25-7-11.25a7 7 0 1114 0c0 3-2.5 6.75-7 11.25z" />
+                                        <circle cx="12" cy="9.75" r="2.25" />
+                                    </svg>
+                                </button>
                                 {index >= 2 && (
                                     <button
                                         type="button"
