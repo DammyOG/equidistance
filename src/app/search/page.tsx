@@ -133,6 +133,8 @@ interface EnrichedPlace extends Place {
     coords: { lat: number; lon: number };
     distances: number[];
     sumDist: number;
+    maxDist: number;
+    spread: number;
 }
 
 let nextAddressId = 2;
@@ -323,10 +325,16 @@ export default function Search() {
                         haversineDistanceMiles(c.lat, c.lon, coords.lat, coords.lon)
                     );
                     const sumDist = distances.reduce((sum, d) => sum + d, 0);
-                    return { ...place, coords, distances, sumDist };
+                    const maxDist = Math.max(...distances);
+                    const minDist = Math.min(...distances);
+                    const spread = maxDist - minDist;
+                    return { ...place, coords, distances, sumDist, maxDist, spread };
                 });
 
-                enriched.sort((a, b) => a.sumDist - b.sumDist);
+                // Favor results where everyone drives a similar distance (low
+                // spread between addresses) over results that merely minimize
+                // the total distance, falling back to sum as a tiebreaker.
+                enriched.sort((a, b) => a.spread - b.spread || a.sumDist - b.sumDist);
                 setPlaces(enriched.slice(0, 5)); // Top 5 results
             }
         } catch (err) {
