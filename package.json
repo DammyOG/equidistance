@@ -15,7 +15,7 @@
     "bcryptjs": "^3.0.2",
     "dictionary-en": "^4.0.0",
     "dotenv": "^16.4.7",
-    "next": "15.2.3",
+    "next": "15.5.19",
     "next-auth": "^4.24.11",
     "nspell": "^2.1.5",
     "prisma": "^6.5.0",

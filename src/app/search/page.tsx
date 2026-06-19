@@ -2,15 +2,6 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 
-// Use your public API key set in your environment variables
-const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-
-/** Helper: Extract address portion before the first comma (if needed) */
-function extractAddressPart(address: string): string {
-    const match = address.match(/^([0-9a-zA-Z\s]+)/);
-    return match ? match[1] : address;
-}
-
 /** Basic Haversine formula to compute approximate distance (in km) */
 interface Coordinates {
     lat: number;
@@ -35,42 +26,19 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Geocode an address using the Google Maps Geocoding API */
+/** Geocode an address via our server-side proxy (OpenStreetMap Nominatim) */
 interface GeocodeResult {
     lat: number;
     lon: number;
 }
 
 async function geocodeAddress(address: string): Promise<GeocodeResult | null> {
-    const res = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-            address
-        )}&key=${GOOGLE_MAPS_API_KEY}`
-    );
+    const res = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`);
     const data = await res.json();
-    // console.log(data);
-    if (data && data.results && data.results.length > 0) {
-        const location = data.results[0].geometry.location;
-        return { lat: location.lat, lon: location.lng };
+    if (data && data.result) {
+        return { lat: data.result.lat, lon: data.result.lon };
     }
     return null;
-}
-
-/** Reverse geocode using the Google Maps Geocoding API */
-async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
-    try {
-        const res = await fetch(
-            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${GOOGLE_MAPS_API_KEY}`
-        );
-        const data = await res.json();
-        if (data && data.results && data.results.length > 0) {
-            return data.results[0].formatted_address;
-        }
-        return null;
-    } catch (error) {
-        console.error("Reverse geocode error:", error);
-        return null;
-    }
 }
 
 /** Calculate the midpoint between two coordinates */
