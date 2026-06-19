@@ -25,7 +25,19 @@ export default function Signup() {
 
             if (res.ok) {
                 // Automatically sign in after successful signup
-                await signIn("credentials", { email, password, callbackUrl: "/" });
+                const signInRes = await signIn("credentials", {
+                    email,
+                    password,
+                    redirect: false,
+                });
+
+                if (!signInRes || signInRes.error) {
+                    setErrorMessage(
+                        signInRes?.error || "Account created, but sign in failed. Please sign in manually."
+                    );
+                } else {
+                    router.push("/");
+                }
             } else {
                 const data = await res.json();
                 setErrorMessage(data.message || "Signup failed. Please try again.");

@@ -29,7 +29,8 @@ const handler = NextAuth({
         );
         if (!isValid) throw new Error("Password does not match");
 
-        return user;
+        const { password, ...userWithoutPassword } = user;
+        return userWithoutPassword;
       },
     }),
   ],

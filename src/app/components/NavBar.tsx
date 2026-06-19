@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 
 export default function NavBar() {
     const { data: session, status } = useSession();
@@ -23,13 +23,13 @@ export default function NavBar() {
                             Home
                         </span>
                     </Link>
-                    <Link href="/profile">
-                        <span className="cursor-pointer text-lg hover:text-gray-300">
-                            Profile
+                </div>
+                <div className="flex items-center space-x-4">
+                    <Link href="/auth/signup">
+                        <span className="cursor-pointer text-md hover:text-gray-300">
+                            Sign Up
                         </span>
                     </Link>
-                </div>
-                <div>
                     <Link href="/auth/signin">
                         <span className="cursor-pointer text-md hover:text-gray-300">
                             Sign In
@@ -48,24 +48,22 @@ export default function NavBar() {
                         Home
                     </span>
                 </Link>
-                {/* <Link href="/profile">
+                <Link href="/search">
                     <span className="cursor-pointer text-lg hover:text-gray-300">
-                        Profile
+                        Search
                     </span>
-                </Link> */}
+                </Link>
             </div>
-            <div>
-                {session ? (
-                    <span className="text-md">
-                        Welcome, {session.user.username}!
-                    </span>
-                ) : (
-                    <Link href="/auth/signin">
-                        <span className="cursor-pointer text-md hover:text-gray-300">
-                            Sign In
-                        </span>
-                    </Link>
-                )}
+            <div className="flex items-center space-x-4">
+                <span className="text-md">
+                    Welcome, {session.user.username}!
+                </span>
+                <button
+                    onClick={() => signOut()}
+                    className="cursor-pointer text-md hover:text-gray-300"
+                >
+                    Sign Out
+                </button>
             </div>
         </nav>
     );
