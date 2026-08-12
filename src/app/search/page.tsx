@@ -33,10 +33,19 @@ interface GeocodeResult {
 }
 
 async function geocodeAddress(address: string): Promise<GeocodeResult | null> {
-    const res = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`);
-    const data = await res.json();
-    if (data && data.result) {
-        return { lat: data.result.lat, lon: data.result.lon };
+    // Nominatim can't reliably re-find its own long display names as free-text
+    // queries, so we try progressively shorter forms if the full string fails.
+    const parts = address.split(",").map((p) => p.trim()).filter(Boolean);
+    const candidates: string[] = [address];
+    if (parts.length > 3) candidates.push(parts.slice(0, 3).join(", "));
+    if (parts.length > 2) candidates.push(parts.slice(0, 2).join(", "));
+
+    for (const candidate of candidates) {
+        const res = await fetch(`/api/geocode?address=${encodeURIComponent(candidate)}`);
+        const data = await res.json();
+        if (data?.result) {
+            return { lat: data.result.lat, lon: data.result.lon };
+        }
     }
     return null;
 }
